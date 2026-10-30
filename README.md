@@ -8,7 +8,7 @@ This project uses a public consumer complaints dataset (real-world text complain
 
 ![Row-normalised confusion matrix for LinearSVC on the held-out test set](outputs/figures/confusion_matrix.png)
 
-*Confusion matrix for the final calibrated LinearSVC model on the 10,000-complaint test set. Each row sums to 100%, so the diagonal is per-category recall.*
+_Confusion matrix for the final calibrated LinearSVC model on the 10,000-complaint test set. Each row sums to 100%, so the diagonal is per-category recall._
 
 ## 🎯 Project Questions
 
@@ -21,29 +21,30 @@ This project uses a public consumer complaints dataset (real-world text complain
 
 **Setup:** 10 product categories, a balanced sample of 50,000 complaints (5,000 per category), stratified 80/20 split (40,000 train / 10,000 test). The input text is the complaint's `Issue` field, vectorized with `TfidfVectorizer(stop_words='english')`, fitted on the training set only.
 
-| Model | Accuracy | Macro-F1 | ROC-AUC | Train time |
-|---|---|---|---|---|
-| MultinomialNB | 0.9060 | 0.9028 | 0.9967 | 0.13 s |
-| LogisticRegression | 0.9792 | 0.9790 | 0.9989 | 0.69 s |
-| LinearSVC | 0.9796 | 0.9794 | 0.9988 | 8.32 s |
+| Model              | Accuracy | Macro-F1 | ROC-AUC | Train time |
+| ------------------ | -------- | -------- | ------- | ---------- |
+| MultinomialNB      | 0.9060   | 0.9028   | 0.9967  | 0.13 s     |
+| LogisticRegression | 0.9792   | 0.9790   | 0.9989  | 0.69 s     |
+| LinearSVC          | 0.9796   | 0.9794   | 0.9988  | 8.32 s     |
 
-*Benchmark run with the plain (uncalibrated) models. The shipped model wraps LinearSVC in `CalibratedClassifierCV` (see finding 5), so its training time is roughly 3 times longer.*
+_Benchmark run with the plain (uncalibrated) models. The shipped model wraps LinearSVC in `CalibratedClassifierCV` (see finding 5), so its training time is roughly 3 times longer._
 
 1. **LinearSVC and Logistic Regression are a tie:** accuracy differs by 0.0004 and ROC-AUC by 0.0001, which is well inside the noise of a single test split. Logistic Regression trains about 12 times faster, so it is the practical choice if training time matters. LinearSVC was kept as the final model, wrapped in `CalibratedClassifierCV` so it outputs real probabilities.
 2. **Naive Bayes trails by about 7 points:** 0.906 accuracy against about 0.979 for the other two. It is the fastest model by far (0.13 s), but its independence assumption costs it on overlapping vocabulary.
 3. **The weak spot is "Credit card or prepaid card":** it has the lowest recall (0.875). About 7.8% of its complaints are predicted as "Checking or savings account" and 4.5% as "Credi and other personal". Student loan complaints leak into Consumer Loan (3.5% of them). These are neighbouring categories that share words such as account, card, payment and loan.
 4. **How vectorization changes the features** (toy example on 5 short account-related complaints):
 
-   | Vectorizer | Vocabulary size | What changes |
-   |---|---|---|
-   | `CountVectorizer()` | 12 terms | Raw word counts, so filler words like "and" and "or" get the same weight as content words |
-   | `TfidfVectorizer()` | 12 terms | Counts are re-weighted by how rare a word is, and each row is scaled to unit length |
-   | `TfidfVectorizer(stop_words='english')` | 10 terms | "and" and "or" disappear, and the weight spreads over the meaningful words |
-   | `TfidfVectorizer(stop_words='english', ngram_range=(1, 2))` | 17 terms | Adds two-word phrases such as "debit atm" and "deposits withdrawals" |
+   | Vectorizer                                                  | Vocabulary size | What changes                                                                              |
+   | ----------------------------------------------------------- | --------------- | ----------------------------------------------------------------------------------------- |
+   | `CountVectorizer()`                                         | 12 terms        | Raw word counts, so filler words like "and" and "or" get the same weight as content words |
+   | `TfidfVectorizer()`                                         | 12 terms        | Counts are re-weighted by how rare a word is, and each row is scaled to unit length       |
+   | `TfidfVectorizer(stop_words='english')`                     | 10 terms        | "and" and "or" disappear, and the weight spreads over the meaningful words                |
+   | `TfidfVectorizer(stop_words='english', ngram_range=(1, 2))` | 17 terms        | Adds two-word phrases such as "debit atm" and "deposits withdrawals"                      |
 
    This shows what each option does to the features. It is not a full-dataset head-to-head, so the first Project Question (how much TF-IDF beats plain counts) is not answered with a measured number here.
+
 5. **Calibrated confidence, with a catch:** `LinearSVC` has no `predict_proba`, so the final model is wrapped in `CalibratedClassifierCV`, which turns its scores into real probabilities. With the earlier softmax shortcut, confidence on correct answers sat at a flat 18–57%. With calibration it ranges from about 50% to 99%.
-6. **Live test, 11 hand-written complaints:** 7 landed in the category I expected, 1 was arguable (a credit repair complaint routed to *Credit reporting*), and 3 differed from my expectation. Two of those 3 came back with very high confidence: "Overdraft fees charged unexpectedly" (95.8%) and "Problem making deposits and withdrawals" (92.1%), both routed to *Credit card or prepaid card*. The third, "Problem with payments on my personal loan" (52.9%), also went to *Credit card or prepaid card*. My expected categories are my own guesses, not taken from the dataset, so some of these may be the model correctly following how that wording is filed in the data. Either way, the lesson is the same: calibrated confidence is honest on text that looks like the training data, but it is not a safety net on unfamiliar wording, so a "needs human review" cutoff alone would not have caught these.
+6. **Live test, 11 hand-written complaints:** 7 landed in the category I expected, 1 was arguable (a credit repair complaint routed to _Credit reporting_), and 3 differed from my expectation. Two of those 3 came back with very high confidence: "Overdraft fees charged unexpectedly" (95.8%) and "Problem making deposits and withdrawals" (92.1%), both routed to _Credit card or prepaid card_. The third, "Problem with payments on my personal loan" (52.9%), also went to _Credit card or prepaid card_. My expected categories are my own guesses, not taken from the dataset, so some of these may be the model correctly following how that wording is filed in the data. Either way, the lesson is the same: calibrated confidence is honest on text that looks like the training data, but it is not a safety net on unfamiliar wording, so a "needs human review" cutoff alone would not have caught these.
 7. **Read the near-perfect scores with care:** ROC-AUC of 0.999 and 98% accuracy are high because the `Issue` field holds only a few dozen distinct values, so the same strings appear in both train and test. The model is mostly learning which issue strings belong to which product, and that is an easier task than understanding free-form complaint text. Scores on genuinely new wording, like the live test above, are lower and less confident.
 
 ---
@@ -117,12 +118,23 @@ Run every command from the project root, because the scripts use relative paths 
    python -m src.evaluate
    ```
 4. **Explore in notebooks**, in order, starting with `notebooks/01_load_explore.ipynb`
+
+   | Notebook            | Open                                                                                                                                                                                                                         |
+   | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+   | 01 Load and explore | [![Open in Kaggle](https://kaggle.com/static/images/open-in-kaggle.svg)](https://kaggle.com/kernels/welcome?src=https://github.com/hexsyro/complaint-triage/blob/main/notebooks/01_load_explore.ipynb)                       |
+   | 02 Vectorization    | [![Open in Kaggle](https://kaggle.com/static/images/open-in-kaggle.svg)](https://kaggle.com/kernels/welcome?src=https://github.com/hexsyro/complaint-triage/blob/main/notebooks/02_vectorization_countvec_tfidf.ipynb)       |
+   | 03 Train/test split | [![Open in Kaggle](https://kaggle.com/static/images/open-in-kaggle.svg)](https://kaggle.com/kernels/welcome?src=https://github.com/hexsyro/complaint-triage/blob/main/notebooks/03_train_test_split.ipynb)                   |
+   | 04 Classifiers      | [![Open in Kaggle](https://kaggle.com/static/images/open-in-kaggle.svg)](https://kaggle.com/kernels/welcome?src=https://github.com/hexsyro/complaint-triage/blob/main/notebooks/04_classifiers_naive_bayes_logreg_svm.ipynb) |
+   | 05 Evaluation       | [![Open in Kaggle](https://kaggle.com/static/images/open-in-kaggle.svg)](https://kaggle.com/kernels/welcome?src=https://github.com/hexsyro/complaint-triage/blob/main/notebooks/05_evaluation_confusion_matrix.ipynb)        |
+
 5. **Try the final router** once a model is trained and saved (the `models/` folder is gitignored, so run step 3 first). Type a complaint and press Enter, or type `q` to quit:
+
    ```bash
    python -m src.route
    ```
 
    Example session:
+
    ```
    write a complaint to predict the product: Incorrect information on your credit report
 
@@ -133,6 +145,7 @@ Run every command from the project root, because the scripts use relative paths 
    ```
 
    More complaints to try:
+
    ```
    "My credit card company charged me twice for the same purchase"
    "Unexpected late fee charged on my account"
@@ -146,12 +159,12 @@ Run every command from the project root, because the scripts use relative paths 
 
 ## 📊 Skills Practiced
 
-| Skill | Where |
-|---|---|
-| Text vectorization (CountVectorizer, TF-IDF) | `notebooks/02`, `src/preprocess.py` |
-| Train/test split workflow (with stratify, correct fit/transform order) | `notebooks/03`, `src/preprocess.py` |
-| Applying classifiers to text data (Naive Bayes, Logistic Regression, LinearSVC) | `notebooks/04`, `src/train.py` |
-| Evaluating classification performance (macro/weighted F1, confusion matrix) | `notebooks/05`, `src/evaluate.py` |
+| Skill                                                                           | Where                               |
+| ------------------------------------------------------------------------------- | ----------------------------------- |
+| Text vectorization (CountVectorizer, TF-IDF)                                    | `notebooks/02`, `src/preprocess.py` |
+| Train/test split workflow (with stratify, correct fit/transform order)          | `notebooks/03`, `src/preprocess.py` |
+| Applying classifiers to text data (Naive Bayes, Logistic Regression, LinearSVC) | `notebooks/04`, `src/train.py`      |
+| Evaluating classification performance (macro/weighted F1, confusion matrix)     | `notebooks/05`, `src/evaluate.py`   |
 
 ---
 
